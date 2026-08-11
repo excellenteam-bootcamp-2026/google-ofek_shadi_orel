@@ -1,0 +1,6 @@
+Store a Python object in a C object pointer.
+
+
+This is the recommended way to accept binary data.
+
+Information about writing a good bug report.
