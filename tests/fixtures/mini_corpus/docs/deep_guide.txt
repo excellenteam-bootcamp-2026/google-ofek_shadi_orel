@@ -1,0 +1,3 @@
+this is a nested guide file.
+Memory allocation happens in tp_alloc.
+this is the last line without newline

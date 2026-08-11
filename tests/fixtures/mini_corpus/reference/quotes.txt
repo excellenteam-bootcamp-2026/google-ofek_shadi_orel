@@ -1,0 +1,2 @@
+To be or not to be, that is the question.
+A duplicate of the line above lives in hamlet.txt.
