@@ -69,3 +69,19 @@ benchmarks/results/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ── Claude Code / Claude Flow local agent state ────────────────────────
+# Local session, config and orchestration state from AI coding agents --
+# machine-specific, not something the team should share via the repo.
+.claude/
+.claude-flow/
+.claudeflow/
+claude-flow.config.*
+.hive-mind/
+.swarm/
+.mcp.json
+.roo/
+.rooflow/
+memory/*.db
+memory/*.sqlite
+coordination/
