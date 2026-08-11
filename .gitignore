@@ -1,0 +1,87 @@
+# ── Python (Stage A — completion engine, all stages' glue code) ───────
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+.venv/
+venv/
+env/
+ENV/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Environment / secrets (Gemini API key, Stage C) ────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Serialized index / built artifacts (offline stage output) ─────────
+# Rebuilt from the corpus by the offline phase — don't commit binaries.
+*.index
+*.pkl
+*.pickle
+index_store/
+
+# ── C / C++ (Stage B — perf rewrite of the hot path) ────────────────────
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.exe
+*.out
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+cmake-build-*/
+Makefile
+
+# pybind11 compiled extension modules
+*.pyd
+*.cpython-*.so
+
+# ── Protobuf generated code (Stage B) ────────────────────────────────────
+*_pb2.py
+*.pb.cc
+*.pb.h
+
+# ── Visual Studio Code ─────────────────────────────────────────────────
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# ── Logs & benchmark output ──────────────────────────────────────────────
+*.log
+logs/
+benchmarks/results/
+
+# ── OS cruft ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Claude Code / Claude Flow local agent state ────────────────────────
+# Local session, config and orchestration state from AI coding agents --
+# machine-specific, not something the team should share via the repo.
+.claude/
+.claude-flow/
+.claudeflow/
+claude-flow.config.*
+.hive-mind/
+.swarm/
+.mcp.json
+.roo/
+.rooflow/
+memory/*.db
+memory/*.sqlite
+coordination/
