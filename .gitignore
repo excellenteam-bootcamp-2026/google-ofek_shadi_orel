@@ -30,12 +30,6 @@ htmlcov/
 *.pickle
 index_store/
 
-# ── Corpus data (Archive.zip contents) ──────────────────────────────────
-# Course-provided text corpus — large, and not our source code.
-Archive.zip
-/data/
-/corpus/
-
 # ── C / C++ (Stage B — perf rewrite of the hot path) ────────────────────
 *.o
 *.obj
