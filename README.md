@@ -151,7 +151,11 @@ Layered hexagonal (Ports & Adapters):
   one-edit matcher, the scorer, the ranker. Depends only on the standard
   library and on `domain/ports.py`, the frozen `Protocol` interfaces
   (`Normalizer`, `Matcher`, `Scorer`, `SentenceIndex`, `IndexStore`,
-  `CorpusReader`) the rest of the system is built against.
+  `CorpusReader`) the rest of the system is built against. `AutoCompleteData`
+  (`domain/models.py`) breaks ties fully deterministically — score, then
+  sentence text, then source file, then offset — so two identical-looking
+  results (e.g. the same line duplicated across corpus files) always rank the
+  same way regardless of Python's per-process set/dict iteration order.
 - **`infrastructure/`** — adapters implementing those protocols against the
   real world: corpus reading (zip or directory), the n-gram candidate index,
   pickle-backed storage.
@@ -166,6 +170,31 @@ Query path: **normalize → filter (index) → verify (matcher) → score → ra
 The index returns a *superset* of possible matches cheaply; the matcher does
 the real check. That split is what keeps queries fast, and it is the seam the
 Phase B C++ backend replaces.
+
+### `AutoCompleteEngine`'s two search passes
+
+Because latency is a graded metric, `get_best_k_completions` does more than
+one filter→verify→score→rank sweep:
+
+- **Pass 1 — exact.** An exact substring match always scores `2 * len(query)`,
+  the highest any alignment can reach, so if `k` sentences already contain the
+  query verbatim, no edit-tolerant alignment can beat them and the search
+  stops there. This pass uses `NGramIndex.exact_candidates` (intersecting on
+  every gram of the query, not just half of it) and skips building a
+  `RawLine` for every candidate — it resolves only the eventual top-`k`
+  winners.
+- **Pass 2 — one edit.** Runs only when pass 1 comes up short (fewer than `k`
+  exact hits) — a typo, or a genuinely rare phrase. This is the full
+  filter→verify→score sweep described above.
+- **Query cache.** An LRU cache (`OrderedDict`, default size 256) keyed on
+  `(normalized_query, k)`, because typing "the" issues `t`, `th`, `the` in
+  quick succession and backspacing re-issues queries already answered.
+
+These are opportunistic: the engine detects at construction time whether its
+`index`/`corpus` collaborators expose the extra capabilities (`getattr`,
+duck-typed) and falls back to the plain single-pass search otherwise — a
+minimal `SentenceIndex`/`Corpus` implementation still works, just without the
+speed-up.
 
 ## Project structure
 
