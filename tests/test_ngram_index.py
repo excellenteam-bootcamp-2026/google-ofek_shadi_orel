@@ -68,30 +68,88 @@ def test_a_half_that_is_nowhere_in_the_corpus_contributes_nothing(index):
     assert set(index.candidates("zzzzzzz qqqqqqq")) == set()
 
 
-# --- the short-query fallback ---------------------------------------------
+# --- short queries, which have no n-gram of their own ---------------------
 
 
-@pytest.mark.parametrize("query", ["cat", "cats", "cat s"])
-def test_queries_too_short_to_split_fall_back_to_the_whole_corpus(
-    index, query
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("ca", {0, 2}),   # 'the cat', 'a cat and a dog'
+        ("rug", {1}),
+        ("z", set()),     # nowhere in the corpus
+    ],
+)
+def test_short_substrings_are_found_through_the_grams_that_contain_them(
+    index, query, expected
 ):
-    """Below 2*gram_size a half is shorter than one n-gram, so the index
-    cannot be consulted at all and every sentence has to be verified.
+    """One and two character strings still resolve exactly.
+
+    They are too short to be gram keys themselves, so the lookup unions the
+    postings of every gram that contains them. No second index needed.
+    """
+    assert set(index._containing(query)) == expected
+
+
+def test_queries_too_short_to_split_still_narrow_the_corpus(index):
+    """These used to fall back to the entire corpus. They no longer do."""
+    everything = set(range(len(CORPUS)))
+    assert set(index.candidates("cats")) < everything
+    assert set(index.candidates("cat s")) < everything
+
+
+@pytest.mark.parametrize("query", ["c", "ca", "cat"])
+def test_queries_too_short_to_split_usefully_offer_everything(index, query):
+    """A half of one character filters nothing while still costing a union.
+
+    Handing over the corpus is the same answer computed for free. These
+    never reach here in practice — a string this short has exact matches
+    everywhere, so the fast path settles them first.
     """
     assert set(index.candidates(query)) == set(range(len(CORPUS)))
 
 
-def test_the_fallback_threshold_follows_the_gram_size():
-    small = NGramIndex(gram_size=2)
-    for sentence_id, sentence in enumerate(CORPUS):
-        small.add(sentence_id, sentence)
-    # With 2-grams the halves only need two characters each, so a 4-character
-    # query is already indexable and must not trigger the fallback.
-    assert set(small.candidates("cats")) != set(range(len(CORPUS)))
+def test_sentences_shorter_than_one_gram_are_not_lost(index):
+    """A sentence with no grams has no postings, so it has to be added back."""
+    index.add(99, "ok")
+    assert 99 in set(index._containing("ok"))
+    assert 99 in set(index._containing("o"))
 
 
 def test_empty_query_returns_nothing(index):
     assert set(index.candidates("")) == set()
+    assert set(index.exact_candidates("")) == set()
+
+
+# --- the exact fast path --------------------------------------------------
+
+
+def test_exact_candidates_finds_a_query_typed_correctly(index):
+    assert 0 in set(index.exact_candidates("sat on the mat"))
+
+
+def test_exact_candidates_is_blind_to_typos(index):
+    """One wrong character poisons up to gram_size grams, and the
+    intersection needs all of them — so this finds nothing. That emptiness
+    is the signal to fall through to `candidates`, not a failure.
+    """
+    assert set(index.exact_candidates("sat on the mut")) == set()
+    assert 0 in set(index.candidates("sat on the mut"))
+
+
+def test_exact_candidates_is_never_wider_than_candidates(index):
+    """The fast path may only ever be a subset of the tolerant path.
+
+    If it could offer something `candidates` does not, taking the shortcut
+    would change which results come back, not just how fast.
+    """
+    for query in ["sat on the mat", "the dog", "cats", "decorators wrap"]:
+        assert set(index.exact_candidates(query)) <= set(index.candidates(query))
+
+
+def test_exact_candidates_works_below_the_split_threshold(index):
+    """The fast path only needs one gram's worth of query, not two."""
+    assert set(index.exact_candidates("cat")) == {0, 2}
+    assert set(index.exact_candidates("ca")) == {0, 2}
 
 
 # --- the property that actually matters -----------------------------------
