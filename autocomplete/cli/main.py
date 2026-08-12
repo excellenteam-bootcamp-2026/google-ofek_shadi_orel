@@ -26,7 +26,7 @@ from autocomplete.domain.ranker import TopKRanker
 from autocomplete.domain.scorer import RuleBasedScorer
 from autocomplete.infrastructure.corpus_reader import CorpusReader
 from autocomplete.infrastructure.index.ngram_index import NGramIndex
-from autocomplete.infrastructure.storage.pickle_store import PickleStore
+from autocomplete.infrastructure.storage.json_store import JsonStore
 
 
 def build_index(corpus_path: Path, index_path: Path) -> tuple[BuiltCorpus, NGramIndex]:
@@ -39,7 +39,7 @@ def build_index(corpus_path: Path, index_path: Path) -> tuple[BuiltCorpus, NGram
     corpus, stats = builder.build(CorpusReader().read(corpus_path))
 
     print(f"  {stats}")
-    PickleStore().save((corpus, index), index_path)
+    JsonStore().save((corpus, index), index_path)
     print(f"  built in {time.perf_counter() - started:.1f}s -> {index_path}")
     return corpus, index
 
@@ -48,7 +48,7 @@ def load_index(index_path: Path) -> tuple[BuiltCorpus, NGramIndex]:
     """Reuse a previously built index."""
     print("Loading the files and preparing the system...")
     started = time.perf_counter()
-    corpus, index = PickleStore().load(index_path)
+    corpus, index = JsonStore().load(index_path)
     print(f"  loaded {len(corpus):,} sentences in {time.perf_counter() - started:.1f}s")
     return corpus, index
 
