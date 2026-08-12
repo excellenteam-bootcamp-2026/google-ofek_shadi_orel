@@ -1,0 +1,4 @@
+Use the "tp_dealloc" slot, then call PyObject_NewVar().
+Column	one	and	column	two.
+The caf\xc3\xa9 na\xc3\xafve r\xc3\xa9sum\xc3\xa9 example.
+Price is $19.99 (50% off!) @ store #42.
