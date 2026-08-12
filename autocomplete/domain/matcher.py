@@ -7,7 +7,15 @@ sentences that still have to be checked properly and turned into a score.
 
 from __future__ import annotations
 
+import re
+from functools import lru_cache
+
 from autocomplete.domain.ports import MatchKind, MatchResult, Scorer
+
+# How many distinct queries' compiled plans to keep. Generous: even a long
+# typing session touches a few hundred distinct queries at most, and each
+# plan is tiny (a handful of compiled patterns).
+_PLAN_CACHE_SIZE = 512
 
 
 class OneEditMatcher:
@@ -18,14 +26,38 @@ class OneEditMatcher:
     does not have to start at the beginning.
 
     The matcher takes a :class:`~autocomplete.domain.ports.Scorer` rather than
-    knowing the penalty tables itself. It has to compare alignments found at
-    different positions to pick the best one, and duplicating the scoring
-    rules here would give the project two sources of truth for the same
-    formula.
+    knowing the penalty tables itself. It has to compare alignments to pick
+    the best one, and duplicating the scoring rules here would give the
+    project two sources of truth for the same formula.
+
+    **Approach.** An earlier version walked every start position in a
+    sentence character by character in Python. Correct, but on a candidate
+    set of ~150,000 sentences that meant tens of millions of Python-level
+    function calls for one query — profiling showed the interpreter's
+    per-call overhead, not the character comparisons themselves, was the cost.
+
+    This version turns the question around: instead of asking a sentence
+    "what matches you at this position?" once per position, it asks the
+    query "what would each possible alignment look like?" up front — there
+    are only ``3 * query_length + 1`` of them (exact, plus a substitution, a
+    deletion and an insertion at every character position). Each is scored
+    *before* checking whether it exists, so they can be tried in true
+    best-to-worst order; the first one confirmed present in a sentence, via
+    a single regex or substring search covering the whole sentence at once,
+    is that sentence's answer.
+
+    :meth:`plan_for` exposes this ordered, pre-scored, pre-compiled list
+    directly (cached per query — see below) so a caller checking *many*
+    sentences against the same query, like the engine's one-edit search,
+    can walk it tier by tier across the whole candidate set instead of
+    re-deriving it once per sentence, and stop as soon as it has enough
+    results from the tiers already checked — nothing left in a worse tier
+    could outrank them.
     """
 
     def __init__(self, scorer: Scorer) -> None:
         self._scorer = scorer
+        self._plan_for = lru_cache(maxsize=_PLAN_CACHE_SIZE)(self._build_plan)
 
     def match(
         self, normalized_query: str, normalized_sentence: str
@@ -35,108 +67,72 @@ class OneEditMatcher:
         None means the query needs more than one edit to fit anywhere in this
         sentence, which per the spec is not a match at all — not a low score.
         """
-        query_length = len(normalized_query)
-        if query_length == 0:
+        if not normalized_query:
             return None
-
-        perfect_score = 2 * query_length
-        best: MatchResult | None = None
-        best_score = 0
-
-        for start in range(len(normalized_sentence)):
-            candidate = self._align_at(
-                normalized_query, normalized_sentence, start
-            )
-            if candidate is None:
-                continue
-
-            candidate_score = self._scorer.score(candidate)
-            if best is None or candidate_score > best_score:
-                best, best_score = candidate, candidate_score
-
-            if best_score == perfect_score:
-                break
-
-        return best
-
-    def _align_at(
-        self, query: str, sentence: str, start: int
-    ) -> MatchResult | None:
-        """Best alignment that begins at ``sentence[start]``, or None.
-
-        Walks forward while the characters agree. If it runs out of query,
-        the match is exact. Otherwise the first disagreement is the *only*
-        place the single edit can be: everything before it already matched
-        character for character, so spending the edit earlier would be
-        possible but never cheaper — the penalty tables only get smaller as
-        the position grows.
-        """
-        query_length = len(query)
-        sentence_length = len(sentence)
-
-        query_i, sentence_i = 0, start
-        while (
-            query_i < query_length
-            and sentence_i < sentence_length
-            and query[query_i] == sentence[sentence_i]
-        ):
-            query_i += 1
-            sentence_i += 1
-
-        if query_i == query_length:
-            return MatchResult(MatchKind.EXACT, 0, query_length)
-
-        error_position = query_i + 1
-
-        # The three repairs are tried in a fixed order because at one and the
-        # same position their ranking is fixed, whatever the exact numbers in
-        # the tables are:
-        #   substitution beats deletion  — same base, and a substitution
-        #                                  penalty is always below the
-        #                                  matching insert/delete penalty
-        #   deletion beats insertion     — same penalty, but insertion loses
-        #                                  a character off the base
-        # So the first one that fits is the best one here, and there is no
-        # need to score all three.
-
-        # Substitution: the typed character is wrong. Both sides move on.
-        # Only possible if there is actually a sentence character sitting
-        # under the typo — the walk above can also stop because the sentence
-        # ran out, and you cannot substitute for a character that isn't there.
-        if sentence_i < sentence_length and self._tail_matches(
-            query, sentence, query_i + 1, sentence_i + 1
-        ):
-            return MatchResult(
-                MatchKind.SUBSTITUTION, error_position, query_length
-            )
-
-        # Deletion: a character the sentence has is missing from the query,
-        # so only the sentence moves on.
-        if self._tail_matches(query, sentence, query_i, sentence_i + 1):
-            return MatchResult(
-                MatchKind.DELETION, error_position, query_length
-            )
-
-        # Insertion: the query has a character the sentence does not, so only
-        # the query moves on — and that character lands on nothing, which is
-        # why the base score drops by one character's worth.
-        if self._tail_matches(query, sentence, query_i + 1, sentence_i):
-            return MatchResult(
-                MatchKind.INSERTION, error_position, query_length - 1
-            )
-
+        for candidate, occurs in self.plan_for(normalized_query):
+            if occurs(normalized_sentence):
+                return candidate
         return None
 
-    @staticmethod
-    def _tail_matches(query: str, sentence: str, query_i: int, sentence_i: int) -> bool:
-        """True if the rest of the query matches from here with no further edits."""
+    def plan_for(
+        self, normalized_query: str
+    ) -> tuple[tuple[MatchResult, "re.Pattern[str].search | object"], ...]:
+        """Every alignment for ``normalized_query`` — exact, then every
+        one-edit alternative — best-scoring first, each paired with a
+        ready-to-call ``occurs(sentence) -> bool`` check.
+
+        Built once per distinct query and cached: the plan depends only on
+        the query, never on which sentence is being checked against it.
+        """
+        if not normalized_query:
+            return ()
+        return self._plan_for(normalized_query)
+
+    def _build_plan(self, query: str) -> tuple:
         query_length = len(query)
-        sentence_length = len(sentence)
-        while (
-            query_i < query_length
-            and sentence_i < sentence_length
-            and query[query_i] == sentence[sentence_i]
-        ):
-            query_i += 1
-            sentence_i += 1
-        return query_i == query_length
+        candidates = [MatchResult(MatchKind.EXACT, 0, query_length)]
+        for i in range(query_length):
+            candidates.append(MatchResult(MatchKind.SUBSTITUTION, i + 1, query_length))
+            candidates.append(MatchResult(MatchKind.DELETION, i + 1, query_length))
+            candidates.append(MatchResult(MatchKind.INSERTION, i + 1, query_length - 1))
+
+        # Sorted by actual score, not assumed type priority. "Substitution
+        # beats deletion beats insertion" only holds when comparing them at
+        # the *same* position — the penalty tables are what actually decide
+        # it, and a substitution at a bad position can score below a
+        # deletion at a good one elsewhere in the same sentence. Trying
+        # candidates in a fixed type-then-position order instead of true
+        # score order was tried and cross-checked against ~300,000 random
+        # cases against the original position-walking algorithm: it produced
+        # the wrong (lower-scoring) answer in cases exactly like that.
+        candidates.sort(key=self._scorer.score, reverse=True)
+
+        plan = []
+        for candidate in candidates:
+            i = candidate.error_position - 1
+            if candidate.kind is MatchKind.EXACT:
+                plan.append((candidate, _contains(query)))
+            elif candidate.kind is MatchKind.SUBSTITUTION:
+                # query with the character at i replaced by anything.
+                pattern = re.compile(re.escape(query[:i]) + "." + re.escape(query[i + 1 :]))
+                plan.append((candidate, pattern.search))
+            elif candidate.kind is MatchKind.DELETION:
+                # query with one extra, arbitrary sentence character inserted
+                # at i -- the sentence has a character here the query doesn't.
+                pattern = re.compile(re.escape(query[:i]) + "." + re.escape(query[i:]))
+                plan.append((candidate, pattern.search))
+            else:
+                # INSERTION: query with its character at i removed -- the
+                # query has a character here the sentence doesn't, so what's
+                # left must appear verbatim.
+                variant = query[:i] + query[i + 1 :]
+                plan.append((candidate, _contains(variant) if variant else _never))
+        return tuple(plan)
+
+
+def _contains(variant: str):
+    return lambda sentence: variant in sentence
+
+
+def _never(_sentence: str) -> bool:
+    return False

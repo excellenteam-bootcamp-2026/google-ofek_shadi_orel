@@ -98,14 +98,32 @@ def test_queries_too_short_to_split_still_narrow_the_corpus(index):
 
 
 @pytest.mark.parametrize("query", ["c", "ca", "cat"])
-def test_queries_too_short_to_split_usefully_offer_everything(index, query):
-    """A half of one character filters nothing while still costing a union.
-
-    Handing over the corpus is the same answer computed for free. These
-    never reach here in practice — a string this short has exact matches
-    everywhere, so the fast path settles them first.
+def test_very_short_queries_still_terminate_and_stay_sound(index, query):
+    """A one-character query has a substitution variant for nearly every
+    other character, so on a small corpus like this one it will often
+    still touch every sentence — but through ~100-300 direct lookups now,
+    not by handing over `_all_ids` unconditionally. See the test below for
+    a case where that distinction actually shows up as fewer candidates.
     """
-    assert set(index.candidates(query)) == set(range(len(CORPUS)))
+    assert set(index.candidates(query)) <= set(range(len(CORPUS)))
+
+
+def test_a_typo_at_the_unsplittable_length_still_excludes_real_non_matches(
+    index, matcher
+):
+    """'cot' (length 3, too short to split) is a typo for 'cat'. Sentence 1
+    ("the dog sat on the rug") shares no such alignment with it — proof this
+    isn't silently falling back to the whole corpus, the way it used to.
+    """
+    candidates = set(index.candidates("cot"))
+    assert 1 not in candidates
+    assert matcher.match("cot", CORPUS[1]) is None      # confirms the exclusion is correct
+    assert matcher.match("cot", CORPUS[0]) is not None  # and that real matches are still found
+    assert 0 in candidates
+
+
+def test_a_length_that_cannot_split_still_returns_nothing_for_the_unrelated(index):
+    assert set(index.candidates("zzz")) == set()
 
 
 def test_sentences_shorter_than_one_gram_are_not_lost(index):

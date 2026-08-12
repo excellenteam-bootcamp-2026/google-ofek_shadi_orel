@@ -95,8 +95,10 @@ def test_substitution_reports_position_and_full_length(
     ("query", "expected_position"),
     [
         ("tthe cat", 2),
-        ("the ccat", 6),
-        ("the caat", 7),
+        ("the cbat", 6),   # not "the ccat"/"the caat": a doubled letter makes
+        ("the caxt", 7),   # removing either copy equally valid -- a real tie,
+                           # not a single expected position. See the test
+                           # below for that case on its own terms.
     ],
 )
 def test_insertion_loses_one_character_from_the_base(
@@ -108,6 +110,20 @@ def test_insertion_loses_one_character_from_the_base(
     assert result.error_position == expected_position
     # The extra character lands on nothing, so it must not be counted.
     assert result.matched_chars == len(query) - 1
+
+
+def test_a_doubled_letter_ties_and_either_resolution_is_correct(matcher, scorer):
+    """"the ccat" has an extra 'c' — removing either copy gives "the cat".
+
+    Position 5 and position 6 are both at or past the penalty table's flat
+    tail, so they score identically. Which one the matcher reports is not
+    specified behaviour; only the score is.
+    """
+    result = matcher.match("the ccat", CAT_SENTENCE)
+    assert result is not None
+    assert result.kind is MatchKind.INSERTION
+    assert result.error_position in (5, 6)
+    assert scorer.score(result) == 2 * 7 - 2  # matched_chars=7, tail penalty=2
 
 
 def test_extra_character_past_the_end_of_the_sentence(matcher):

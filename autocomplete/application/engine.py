@@ -64,6 +64,13 @@ class AutoCompleteEngine:
         # an exact-only lookup unlocks the exact pass below.
         self._exact_candidates = getattr(index, "exact_candidates", None)
 
+        # `Matcher` only promises `match`. One that also exposes its scored,
+        # pre-compiled search plan for a query lets the one-edit pass below
+        # walk it tier by tier across every candidate at once, instead of
+        # asking "what matches this one sentence?" up to `3*len(query)+1`
+        # times per sentence -- see `_one_edit_pass`.
+        self._plan_for = getattr(matcher, "plan_for", None)
+
         # `Corpus` only promises `get`, which returns the normalized text *and*
         # builds a RawLine. Both search passes need the normalized text for
         # every candidate but the RawLine only for the handful that match, so
@@ -160,6 +167,59 @@ class AutoCompleteEngine:
 
     def _one_edit_pass(self, normalized_query: str, k: int) -> list[AutoCompleteData]:
         """The thorough search: any alignment within a single edit."""
+        if self._plan_for is not None:
+            return self._one_edit_pass_tiered(normalized_query, k)
+        return self._one_edit_pass_per_sentence(normalized_query, k)
+
+    def _one_edit_pass_tiered(self, normalized_query: str, k: int) -> list[AutoCompleteData]:
+        """Checks candidates against the best-scoring alignment first, across
+        *all* of them at once, before moving to the next-best.
+
+        Once enough results have come from the tiers already checked, the
+        remaining, still-unmatched candidates cannot hold anything better --
+        by definition they failed every tier tried so far -- so they never
+        need to be looked at, let alone run through the matcher. On a query
+        whose candidate set numbers in the hundreds of thousands but where
+        the true matches cluster in the first tier or two, this is the
+        difference between checking a handful of alignments and checking
+        every alignment against every candidate.
+        """
+        normalized_of = self._normalized_of
+        get = self._corpus.get
+        score_of = self._scorer.score
+        wanted = k * _DEDUP_HEADROOM
+
+        remaining = list(self._index.candidates(normalized_query))
+        results: list[AutoCompleteData] = []
+        append = results.append
+
+        for alignment, occurs in self._plan_for(normalized_query):
+            if not remaining or len(results) >= wanted:
+                break
+            score = score_of(alignment)
+            still_remaining = []
+            for sentence_id in remaining:
+                if len(results) >= wanted:
+                    # Enough from this tier already -- every id left
+                    # untouched here scores identically (same tier), so
+                    # which ones get resolved into AutoCompleteData is
+                    # arbitrary. Carry the rest over unresolved instead of
+                    # building objects for them only to discard most; if a
+                    # later tier is somehow still checked they're still in
+                    # play, and if not they're simply never looked at.
+                    still_remaining.append(sentence_id)
+                elif occurs(normalized_of(sentence_id)):
+                    raw = get(sentence_id)[1]
+                    append(AutoCompleteData(raw.text, raw.path, raw.line_no, score))
+                else:
+                    still_remaining.append(sentence_id)
+            remaining = still_remaining
+
+        return self._ranker.rank(results, k=k)
+
+    def _one_edit_pass_per_sentence(self, normalized_query: str, k: int) -> list[AutoCompleteData]:
+        """Fallback for a `Matcher` that only offers `match` — one call per
+        candidate sentence, no cross-candidate early stopping possible."""
         normalized_of = self._normalized_of
         get = self._corpus.get
         match = self._matcher.match

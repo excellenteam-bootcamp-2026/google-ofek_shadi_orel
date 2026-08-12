@@ -15,6 +15,12 @@ DEFAULT_GRAM_SIZE = 3
 # nothing while still costing a full union to compute.
 MIN_USEFUL_HALF = 2
 
+# Alphabet a normalized sentence is built from: lowercase letters, digits,
+# and the single space that survives punctuation stripping. One-edit
+# variants are only generated over these characters -- a substitution to
+# anything else could never match a normalized sentence.
+_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789 "
+
 
 class NGramIndex:
     """Maps every n-character window in the corpus to the sentences holding it.
@@ -95,20 +101,61 @@ class NGramIndex:
         if query_length == 0:
             return set()
 
-        # A one-character half constrains almost nothing — nearly every
-        # sentence contains any given letter — so splitting this far costs a
-        # large union and returns roughly the whole corpus anyway. Hand the
-        # corpus over directly instead; it is the same answer, computed for
-        # free. In practice these queries never get here: the exact fast path
-        # settles them, because a string this short has matches everywhere.
+        # Too short to split into two halves that are each useful — a
+        # one-character half matches almost every sentence, so splitting
+        # this far would union in most of the corpus anyway. Below this
+        # length, enumerate every one-edit variant of the query instead and
+        # look each one up as an *exact* substring. This is sound for the
+        # same reason the pigeonhole split is: whatever the single edit is,
+        # it turns the query into one of exactly these variants, so a
+        # sentence that matches must contain at least one of them verbatim.
+        # There are at most a few hundred variants, so this stays cheap even
+        # when very few of them turn out to have any real matches at all —
+        # which is exactly the case that used to fall through to scanning
+        # the whole corpus with the matcher.
         if query_length < 2 * MIN_USEFUL_HALF:
-            return set(self._all_ids)
+            return self._short_query_candidates(normalized_query)
 
         split = query_length // 2
         first_half = normalized_query[:split]
         second_half = normalized_query[split:]
 
         return self._containing(first_half) | self._containing(second_half)
+
+    def _short_query_candidates(self, normalized_query: str) -> set[int]:
+        """Union of exact matches for the query and every one-edit variant.
+
+        Each variant is looked up through :meth:`_containing`, which already
+        knows how to answer an exact-substring question at any length — so
+        this adds no new lookup machinery, only a small, bounded set of
+        extra questions to ask it.
+        """
+        survivors = set(self._containing(normalized_query))
+        for variant in self._one_edit_variants(normalized_query):
+            survivors |= self._containing(variant)
+        return survivors
+
+    def _one_edit_variants(self, query: str) -> Iterable[str]:
+        """Every string one substitution, insertion or deletion away from ``query``.
+
+        Skips deletions that would empty the string entirely: "every
+        sentence contains the empty string" is trivially true and would
+        defeat the whole point of narrowing anything down. It is also
+        harmless to skip — that alignment has zero matched characters, so
+        it scores negative under the appendix's insertion penalties, and
+        would never survive ranking against a corpus of any real size.
+        """
+        length = len(query)
+        for i in range(length):
+            for character in _ALPHABET:
+                if character != query[i]:
+                    yield query[:i] + character + query[i + 1 :]
+            deletion = query[:i] + query[i + 1 :]
+            if deletion:
+                yield deletion
+        for i in range(length + 1):
+            for character in _ALPHABET:
+                yield query[:i] + character + query[i:]
 
     def _containing(self, substring: str) -> set[int]:
         """Superset of the sentences containing ``substring`` exactly."""
