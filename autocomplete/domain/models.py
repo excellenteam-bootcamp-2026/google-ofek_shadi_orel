@@ -41,12 +41,24 @@ class AutoCompleteData:
         real ordering once here, rather than a "looks right" inverted one,
         is what lets every caller -- `sorted()`, `sorted(reverse=True)`,
         `heapq.nlargest()` -- get the correct top-5 ordering for free.
+
+        True duplicates -- same score AND same sentence text, e.g. the same
+        line repeated across many corpus files -- fall through to a
+        deterministic tie-break on source_text then offset. Without this,
+        which results "win" among identical duplicates depends on Python's
+        set/dict iteration order, which varies per process run
+        (PYTHONHASHSEED) -- the same query against the same corpus could
+        return a different top-5 every time it's run.
         """
         if not isinstance(other, AutoCompleteData):
             return NotImplemented
         if self.score != other.score:
             return self.score < other.score
-        return self.completed_sentence > other.completed_sentence
+        if self.completed_sentence != other.completed_sentence:
+            return self.completed_sentence > other.completed_sentence
+        if self.source_text != other.source_text:
+            return self.source_text < other.source_text
+        return self.offset < other.offset
 
     def __eq__(self, other: object) -> bool:
         """Two results are equal only if all four fields match.
