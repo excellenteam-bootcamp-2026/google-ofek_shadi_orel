@@ -1,0 +1,17 @@
+# Runtime dependencies for `autocomplete/`.
+#
+# As of this writing, every implemented module under autocomplete/domain/
+# and autocomplete/infrastructure/ imports only the Python standard library
+# (pathlib, os, zipfile, io, typing, dataclasses, enum, collections.abc,
+# heapq, re). There is nothing to pin here yet.
+#
+# This file will gain entries as the remaining placeholder modules are
+# filled in — for example `protobuf` if infrastructure/storage/protobuf_store.py
+# is implemented, or a Gemini client library if infrastructure/llm/gemini_provider.py
+# is implemented. Re-scan imports before release.
+#
+# Dev/test dependencies (pytest) live in this same file rather than a
+# separate requirements-dev.txt — the project is small enough that a
+# runtime/dev split isn't worth the extra file yet.
+
+pytest>=7
