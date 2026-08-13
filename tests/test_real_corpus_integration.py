@@ -28,7 +28,7 @@ from autocomplete.domain.ranker import TopKRanker
 from autocomplete.domain.scorer import RuleBasedScorer
 from autocomplete.infrastructure.corpus_reader import CorpusReader
 from autocomplete.infrastructure.index.ngram_index import NGramIndex
-from autocomplete.infrastructure.storage.pickle_store import PickleStore
+from autocomplete.infrastructure.storage.json_store import JsonStore
 
 ARCHIVE = Path(__file__).resolve().parents[1] / "Archive.zip"
 
@@ -215,8 +215,8 @@ def test_very_short_query_is_handled(real_engine):
 # ---------------------------------------------------------------------------
 def test_real_index_round_trips_through_the_store(real_build, tmp_path):
     corpus, index, _stats = real_build
-    target = tmp_path / "real_index.pkl"
-    store = PickleStore()
+    target = tmp_path / "real_index.json"
+    store = JsonStore()
     store.save((corpus, index), target)
     loaded_corpus, loaded_index = store.load(target)
 

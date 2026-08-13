@@ -20,7 +20,7 @@ from typing import Protocol, runtime_checkable
 
 from autocomplete.domain.models import AutoCompleteData
 from autocomplete.domain.ports import Matcher, Normalizer, RawLine, Scorer, SentenceIndex
-from autocomplete.domain.ranker import TopKRanker
+from autocomplete.domain.ranker import TopKRanker, DEFAULT_SUGGESTION_COUNT
 
 # Ties are broken alphabetically and the ranker deduplicates before taking the
 # top k, so a run of identical lines among the best-ranked could otherwise
@@ -83,7 +83,7 @@ class AutoCompleteEngine:
         self._cache: OrderedDict[tuple[str, int], list[AutoCompleteData]] = OrderedDict()
         self._cache_size = cache_size
 
-    def get_best_k_completions(self, prefix: str, k: int = 5) -> list[AutoCompleteData]:
+    def get_best_k_completions(self, prefix: str, k: int = DEFAULT_SUGGESTION_COUNT) -> list[AutoCompleteData]:
         """Return the k best completions for what the user has typed.
 
         Two passes, cheapest first.

@@ -12,5 +12,3 @@ DEFAULT_CORPUS = PROJECT_ROOT / "Archive.zip"
 
 # Where the offline phase writes its result and the online phase reads it.
 DEFAULT_INDEX_PATH = PROJECT_ROOT / "index_store" / "index.json"
-
-SUGGESTION_COUNT = 5

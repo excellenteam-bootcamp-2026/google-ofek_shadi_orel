@@ -12,6 +12,8 @@ from typing import Iterable
 
 from autocomplete.domain.models import AutoCompleteData
 
+DEFAULT_SUGGESTION_COUNT = 5   # spec: return the five best completions
+
 
 class TopKRanker:
     """Deduplicates, then returns the k best `AutoCompleteData`.
@@ -24,6 +26,6 @@ class TopKRanker:
     k output slots and silently push out a distinct one.
     """
 
-    def rank(self, results: Iterable[AutoCompleteData], k: int = 5) -> list[AutoCompleteData]:
+    def rank(self, results: Iterable[AutoCompleteData], k: int = DEFAULT_SUGGESTION_COUNT) -> list[AutoCompleteData]:
         deduped = set(results)
         return heapq.nlargest(k, deduped)
